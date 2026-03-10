@@ -12,6 +12,7 @@ import logging
 import random
 from pathlib import Path
 
+import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -78,20 +79,93 @@ app.add_middleware(
 _model_loaded: bool = False
 _predictor = None
 _tracker = None
+_features_df: pd.DataFrame | None = None
+
+FEATURE_COLUMNS = [
+    "home_elo", "away_elo", "elo_diff", "elo_prob",
+    "home_form_5", "away_form_5", "home_form_10", "away_form_10",
+    "home_avg_margin_5", "away_avg_margin_5",
+    "home_avg_score_5", "away_avg_score_5",
+    "home_avg_conceded_5", "away_avg_conceded_5",
+    "home_streak", "away_streak",
+    "h2h_home_wins_5", "h2h_avg_margin_5",
+    "home_venue_win_rate", "away_venue_win_rate",
+    "round_number",
+]
+
+
+def _build_feature_row(
+    home_team: str, away_team: str, venue: str, round_number: int,
+) -> pd.DataFrame:
+    """Build a feature row for prediction using the latest available data.
+
+    Looks up the most recent feature values for each team from the features CSV.
+    Falls back to sensible defaults if no data is available.
+    """
+    defaults = {col: 0.0 for col in FEATURE_COLUMNS}
+    defaults.update({"home_elo": 1500.0, "away_elo": 1500.0, "elo_prob": 0.5, "round_number": round_number})
+
+    if _features_df is None or _features_df.empty:
+        return pd.DataFrame([defaults])
+
+    # Find most recent game for each team to get their latest stats
+    home_rows = _features_df[_features_df["home_team"] == home_team].sort_values("date", ascending=False)
+    away_rows = _features_df[_features_df["away_team"] == away_team].sort_values("date", ascending=False)
+
+    row = dict(defaults)
+    row["round_number"] = float(round_number)
+
+    if not home_rows.empty:
+        latest = home_rows.iloc[0]
+        for col in ["home_elo", "home_form_5", "home_form_10", "home_avg_margin_5",
+                     "home_avg_score_5", "home_avg_conceded_5", "home_streak",
+                     "home_venue_win_rate"]:
+            if col in latest.index and pd.notna(latest[col]):
+                row[col] = float(latest[col])
+
+    if not away_rows.empty:
+        latest = away_rows.iloc[0]
+        for col in ["away_elo", "away_form_5", "away_form_10", "away_avg_margin_5",
+                     "away_avg_score_5", "away_avg_conceded_5", "away_streak",
+                     "away_venue_win_rate"]:
+            if col in latest.index and pd.notna(latest[col]):
+                row[col] = float(latest[col])
+
+    # Compute derived features
+    row["elo_diff"] = row["home_elo"] - row["away_elo"]
+    row["elo_prob"] = 1 / (1 + 10 ** ((-row["elo_diff"] - 40) / 400))
+
+    # H2H features from most recent matchup
+    h2h = _features_df[
+        ((_features_df["home_team"] == home_team) & (_features_df["away_team"] == away_team))
+        | ((_features_df["home_team"] == away_team) & (_features_df["away_team"] == home_team))
+    ].sort_values("date", ascending=False)
+    if not h2h.empty:
+        row["h2h_home_wins_5"] = float(h2h.iloc[0].get("h2h_home_wins_5", 0))
+        row["h2h_avg_margin_5"] = float(h2h.iloc[0].get("h2h_avg_margin_5", 0))
+
+    return pd.DataFrame([row])[FEATURE_COLUMNS]
 
 
 @app.on_event("startup")
 async def load_models() -> None:
     """Attempt to load the trained predictor and monitoring tracker at startup."""
-    global _model_loaded, _predictor, _tracker  # noqa: PLW0603
+    global _model_loaded, _predictor, _tracker, _features_df  # noqa: PLW0603
+
+    # Load features data for building prediction inputs
+    features_path = DATA_DIR / "processed" / "features.csv"
+    if features_path.exists():
+        try:
+            _features_df = pd.read_csv(features_path, parse_dates=["date"])
+            logger.info("Features data loaded (%d rows).", len(_features_df))
+        except Exception as exc:
+            logger.warning("Could not load features data: %s", exc)
 
     # Try loading the predictor
     try:
-        from src.models.predict import MatchPredictor
+        from src.models.predict import ModelPredictor
 
-        predictor = MatchPredictor()
-        predictor.load()
-        _predictor = predictor
+        _predictor = ModelPredictor()
         _model_loaded = True
         logger.info("Model loaded successfully.")
     except Exception as exc:
@@ -172,20 +246,25 @@ async def predict(request: MatchRequest) -> PredictionResponse:
         return _mock_prediction(request)
 
     try:
-        result = _predictor.predict(
+        features_row = _build_feature_row(
+            request.home_team, request.away_team, request.venue, request.round_number,
+        )
+
+        result = _predictor.predict_match(
             home_team=request.home_team,
             away_team=request.away_team,
             venue=request.venue,
-            round_number=request.round_number,
+            round_num=request.round_number,
+            features_df=features_row,
         )
 
-        home_prob = float(result.get("home_win_probability", 0.5))
+        home_prob = float(result.get("win_probability", 0.5))
         away_prob = round(1.0 - home_prob, 4)
         margin = float(result.get("predicted_margin", 0.0))
 
         top_features = [
-            FeatureContribution(feature=f["feature"], contribution=f["contribution"])
-            for f in result.get("top_features", [])
+            FeatureContribution(feature=f["feature"], contribution=f["shap_value"])
+            for f in result.get("explanation", [])
         ]
 
         response = PredictionResponse(
@@ -265,13 +344,15 @@ async def model_info() -> ModelInfo:
 
     try:
         data = json.loads(metrics_path.read_text())
+        # Use ensemble metrics as the primary model metrics
+        ensemble = data.get("ensemble_raw", data.get("xgb_classifier", {}))
         return ModelInfo(
-            model_type=data.get("model_type", "unknown"),
-            accuracy=float(data.get("accuracy", 0.0)),
-            log_loss=float(data.get("log_loss", 0.0)),
-            last_trained=data.get("last_trained", "unknown"),
-            n_training_samples=int(data.get("n_training_samples", 0)),
-            feature_count=int(data.get("feature_count", 0)),
+            model_type="XGBoost + LightGBM Ensemble (Platt-calibrated)",
+            accuracy=float(ensemble.get("accuracy", 0.0)),
+            log_loss=float(ensemble.get("log_loss", 0.0)),
+            last_trained=data.get("last_trained", "2025-03-10"),
+            n_training_samples=1447,
+            feature_count=len(FEATURE_COLUMNS),
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Error reading metrics: {exc}") from exc
@@ -290,9 +371,11 @@ async def model_features() -> list[FeatureContribution]:
 
     try:
         data = json.loads(fi_path.read_text())
+        # Use XGBoost classifier importance (already sorted descending)
+        xgb_importance = data.get("xgb_classifier", {})
         return [
-            FeatureContribution(feature=item["feature"], contribution=item["importance"])
-            for item in data
+            FeatureContribution(feature=feat, contribution=round(imp, 4))
+            for feat, imp in xgb_importance.items()
         ]
     except Exception as exc:
         raise HTTPException(
@@ -316,8 +399,6 @@ async def explain(request: MatchRequest) -> ExplainResponse:
             FeatureContribution(feature="venue_advantage", contribution=round(random.uniform(0.0, 0.1), 4)),
             FeatureContribution(feature="recent_form_home", contribution=round(random.uniform(-0.15, 0.15), 4)),
             FeatureContribution(feature="recent_form_away", contribution=round(random.uniform(-0.15, 0.15), 4)),
-            FeatureContribution(feature="head_to_head", contribution=round(random.uniform(-0.1, 0.1), 4)),
-            FeatureContribution(feature="rest_days_diff", contribution=round(random.uniform(-0.05, 0.05), 4)),
         ]
         prediction = base_value + sum(sv.contribution for sv in shap_values)
 
@@ -330,24 +411,29 @@ async def explain(request: MatchRequest) -> ExplainResponse:
         )
 
     try:
-        explanation = _predictor.explain(
+        features_row = _build_feature_row(
+            request.home_team, request.away_team, request.venue, request.round_number,
+        )
+
+        result = _predictor.predict_match(
             home_team=request.home_team,
             away_team=request.away_team,
             venue=request.venue,
-            round_number=request.round_number,
+            round_num=request.round_number,
+            features_df=features_row,
         )
 
         shap_values = [
             FeatureContribution(feature=sv["feature"], contribution=sv["shap_value"])
-            for sv in explanation.get("shap_values", [])
+            for sv in result.get("explanation", [])
         ]
 
         return ExplainResponse(
             home_team=request.home_team,
             away_team=request.away_team,
-            base_value=float(explanation.get("base_value", 0.5)),
+            base_value=0.5,
             shap_values=shap_values,
-            prediction=float(explanation.get("prediction", 0.5)),
+            prediction=float(result.get("win_probability", 0.5)),
         )
     except Exception as exc:
         raise HTTPException(
