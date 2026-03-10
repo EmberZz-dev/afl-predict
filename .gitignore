@@ -35,3 +35,7 @@ Thumbs.db
 
 # Environment
 .env
+
+# Private docs (not for GitHub)
+docs/STUDY_GUIDE.md
+docs/ROADMAP.md
