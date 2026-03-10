@@ -141,10 +141,17 @@ afl-predict/
 │       └── tracker.py          # Prediction logging & drift detection
 ├── tests/
 │   ├── test_features.py        # Feature engineering & leakage tests
-│   └── test_api.py             # API endpoint tests
+│   ├── test_api.py             # API endpoint tests (25 tests)
+│   ├── test_clean.py           # Data cleaning & team name tests
+│   └── test_tracker.py         # Monitoring & drift detection tests
+├── notebooks/
+│   ├── 01_eda.ipynb             # Exploratory data analysis
+│   ├── 02_features.ipynb        # Feature analysis & correlation
+│   ├── 03_model_v1.ipynb        # Model training & evaluation
+│   ├── 04_calibration.ipynb     # Calibration & model improvement
+│   └── 05_explanations.ipynb    # SHAP explanations & monitoring
 ├── docs/
-│   ├── methodology.md          # Detailed methodology write-up
-│   └── ROADMAP.md              # Development roadmap
+│   └── methodology.md          # Detailed methodology write-up
 ├── data/                       # Raw & processed datasets (gitignored)
 ├── models/saved/               # Trained model artifacts (gitignored)
 ├── requirements.txt
@@ -216,6 +223,28 @@ curl -X POST http://localhost:8000/predict \
   ]
 }
 ```
+
+## Notebooks
+
+| Notebook | Description |
+|----------|-------------|
+| `01_eda.ipynb` | Exploratory data analysis — score distributions, home advantage, venue effects |
+| `02_features.ipynb` | Feature analysis — ELO evolution, correlation matrix, leakage checks |
+| `03_model_v1.ipynb` | Model comparison — baselines, confusion matrices, ROC curves, error analysis |
+| `04_calibration.ipynb` | Platt vs isotonic calibration, reliability diagrams, interaction features |
+| `05_explanations.ipynb` | SHAP summary/dependence/waterfall plots, rolling accuracy monitoring |
+
+## Testing
+
+```bash
+python -m pytest tests/ -v
+```
+
+56 tests covering:
+- **API endpoints** (25 tests) — all 7 endpoints, error handling, validation
+- **Feature engineering** (8 tests) — ELO calculations, data leakage prevention
+- **Data cleaning** (13 tests) — team name standardisation, round number parsing
+- **Monitoring** (10 tests) — prediction logging, drift detection, accuracy reports
 
 ## Tech Stack
 
