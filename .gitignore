@@ -36,6 +36,10 @@ Thumbs.db
 # Environment
 .env
 
+# Coverage
+.coverage
+htmlcov/
+
 # Private docs (not for GitHub)
 docs/STUDY_GUIDE.md
 docs/ROADMAP.md

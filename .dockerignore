@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+notebooks/
+tests/
+docs/
+*.ipynb
+.DS_Store
+.idea/
+.vscode/
+.env

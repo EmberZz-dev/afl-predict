@@ -101,6 +101,15 @@ xychart-beta
     bar [0.161, 0.148, 0.046, 0.043, 0.040]
 ```
 
+## Results
+
+- **65.7% accuracy** on 397 held-out test games (temporal split: train 2015-2023, test 2024+)
+- Beats the home-team baseline (57%) by **8.7 percentage points**
+- **Log loss 0.585** vs 0.693 for random guessing — predicted probabilities carry real information
+- **Brier score 0.203** vs 0.25 for random — well-calibrated probability estimates
+- Top predictive features: ELO win probability, ELO difference, team ELO ratings
+- All features pass leakage checks (no feature has |r| > 0.95 with the target)
+
 ## Quick Start
 
 ```bash
@@ -121,6 +130,26 @@ uvicorn src.api.main:app --reload
 # Open http://localhost:8000/docs
 ```
 
+### Dashboard
+
+```bash
+streamlit run dashboard.py
+# Open http://localhost:8501
+```
+
+Features:
+- **Round Predictions** — win probabilities for every upcoming match
+- **Season Simulation** — Monte Carlo ladder prediction with finals/premiership probabilities
+- **Model Performance** — live accuracy tracking on 2026 results
+- **One-click Retrain** — re-fetches data and retrains models from the sidebar
+
+### Docker
+
+```bash
+docker build -t afl-predict .
+docker run -p 8000:8000 afl-predict
+```
+
 ## Project Structure
 
 ```
@@ -137,8 +166,10 @@ afl-predict/
 │   ├── api/
 │   │   ├── main.py             # FastAPI application
 │   │   └── schemas.py          # Pydantic request/response models
-│   └── monitoring/
-│       └── tracker.py          # Prediction logging & drift detection
+│   ├── monitoring/
+│   │   └── tracker.py          # Prediction logging & drift detection
+│   └── simulator/
+│       └── season.py           # Monte Carlo season & ladder simulation
 ├── tests/
 │   ├── test_features.py        # Feature engineering & leakage tests
 │   ├── test_api.py             # API endpoint tests (25 tests)
@@ -154,6 +185,8 @@ afl-predict/
 │   └── methodology.md          # Detailed methodology write-up
 ├── data/                       # Raw & processed datasets (gitignored)
 ├── models/saved/               # Trained model artifacts (gitignored)
+├── dashboard.py               # Streamlit dashboard (season simulation)
+├── Dockerfile
 ├── requirements.txt
 └── README.md
 ```
@@ -255,6 +288,7 @@ python -m pytest tests/ -v
 | **API** | FastAPI, Pydantic, uvicorn |
 | **Monitoring** | Custom drift detector, matplotlib |
 | **Testing** | pytest, FastAPI TestClient |
+| **Deployment** | Docker, uvicorn |
 
 ## Methodology
 
