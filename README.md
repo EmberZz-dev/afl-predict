@@ -164,7 +164,7 @@ mindmap
 
 ## API Endpoints
 
-The app also has a REST API you can use programmatically. Full interactive docs available at `/docs`.
+The app also has a REST API you can use programmatically. Full interactive docs available at `https://afl-predict.onrender.com/docs`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
