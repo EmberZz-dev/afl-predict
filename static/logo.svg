@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <!-- Football shape -->
+  <ellipse cx="24" cy="24" rx="18" ry="12" fill="#3b82f6" transform="rotate(-30 24 24)"/>
+  <ellipse cx="24" cy="24" rx="18" ry="12" fill="url(#grad)" transform="rotate(-30 24 24)"/>
+  <!-- Seam lines -->
+  <line x1="14" y1="14" x2="34" y2="34" stroke="white" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
+  <line x1="18" y1="19" x2="20" y2="17" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+  <line x1="21" y1="22" x2="23" y2="20" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+  <line x1="24" y1="25" x2="26" y2="23" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+  <line x1="27" y1="28" x2="29" y2="26" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+  <line x1="30" y1="31" x2="32" y2="29" stroke="white" stroke-width="1" stroke-linecap="round" opacity="0.4"/>
+  <!-- Chart bars overlay (analytics feel) -->
+  <rect x="16" y="28" width="3" height="6" rx="1" fill="white" opacity="0.7"/>
+  <rect x="20.5" y="25" width="3" height="9" rx="1" fill="white" opacity="0.8"/>
+  <rect x="25" y="22" width="3" height="12" rx="1" fill="white" opacity="0.9"/>
+  <rect x="29.5" y="19" width="3" height="15" rx="1" fill="white" opacity="0.7"/>
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="48" y2="48">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+</svg>

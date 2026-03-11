@@ -10,11 +10,17 @@ Run with: uvicorn src.api.main:app --reload
 import json
 import logging
 import random
+import time
+from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+import requests as http_requests
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.api.schemas import (
     AccuracyReport,
@@ -24,8 +30,11 @@ from src.api.schemas import (
     MatchRequest,
     ModelInfo,
     PredictionResponse,
+    SimulationRequest,
     TeamInfo,
 )
+from src.data.clean import standardise_team_name
+from src.simulator.season import simulate_season
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +67,67 @@ AFL_TEAMS = [
 _DEFAULT_ELO: dict[str, float] = {team: 1500.0 for team in AFL_TEAMS}
 _DEFAULT_FORM: dict[str, float] = {team: 0.5 for team in AFL_TEAMS}
 
+
+# ── Rate limiter ─────────────────────────────────────────────────────
+
+# Per-IP request tracking: {ip: [timestamp, timestamp, ...]}
+_rate_limit_store: dict[str, list[float]] = defaultdict(list)
+
+# General: 60 requests per minute per IP
+_RATE_LIMIT_GENERAL = 60
+_RATE_LIMIT_WINDOW = 60.0
+
+# Heavy endpoints: 5 requests per minute per IP
+_RATE_LIMIT_HEAVY = 5
+_HEAVY_PATHS = {"/simulate", "/explain"}
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Simple in-memory rate limiter by client IP."""
+
+    async def dispatch(self, request: Request, call_next):
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        path = request.url.path
+
+        # Skip rate limiting for static files and health checks
+        if path.startswith("/static") or path == "/health" or path == "/":
+            response = await call_next(request)
+            return self._add_security_headers(response)
+
+        # Determine limit for this path
+        is_heavy = path in _HEAVY_PATHS
+        limit = _RATE_LIMIT_HEAVY if is_heavy else _RATE_LIMIT_GENERAL
+        key = f"{client_ip}:{'heavy' if is_heavy else 'general'}"
+
+        # Clean old entries and check
+        _rate_limit_store[key] = [
+            t for t in _rate_limit_store[key] if now - t < _RATE_LIMIT_WINDOW
+        ]
+
+        if len(_rate_limit_store[key]) >= limit:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please try again later."},
+                headers={
+                    "Retry-After": str(int(_RATE_LIMIT_WINDOW)),
+                    "X-RateLimit-Limit": str(limit),
+                },
+            )
+
+        _rate_limit_store[key].append(now)
+
+        response = await call_next(request)
+        return self._add_security_headers(response)
+
+    @staticmethod
+    def _add_security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
+
+
 app = FastAPI(
     title="AFL Match Predictor API",
     description=(
@@ -65,7 +135,11 @@ app = FastAPI(
         "Provides win probabilities, margin estimates, and SHAP-based explanations."
     ),
     version="1.0.0",
+    docs_url="/docs",
+    redoc_url=None,
 )
+
+app.add_middleware(RateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -74,6 +148,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve the frontend
+STATIC_DIR = PROJECT_ROOT / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Global state populated at startup
 _model_loaded: bool = False
@@ -234,6 +313,15 @@ def _validate_team(team_name: str) -> None:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.get("/", include_in_schema=False)
+async def serve_frontend():
+    """Serve the main frontend page."""
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path))
+    return {"message": "AFL Match Predictor API. Visit /docs for API documentation."}
 
 
 @app.post("/predict", response_model=PredictionResponse)
@@ -449,6 +537,320 @@ async def health() -> HealthResponse:
         model_loaded=_model_loaded,
         version="1.0.0",
     )
+
+
+# ---------------------------------------------------------------------------
+# Squiggle API cache & helpers
+# ---------------------------------------------------------------------------
+
+_squiggle_cache: dict[int, dict] = {}
+_squiggle_cache_ts: dict[int, float] = {}
+_CACHE_TTL = 300  # 5 minutes
+_SQUIGGLE_RATE_LIMIT_INTERVAL = 1.0  # seconds between requests
+_last_squiggle_request: float = 0.0
+
+
+def _fetch_squiggle_games(year: int) -> list[dict]:
+    """Fetch games from the Squiggle API with caching and rate limiting."""
+    global _last_squiggle_request  # noqa: PLW0603
+
+    now = time.time()
+
+    # Return cached data if still fresh
+    if year in _squiggle_cache and (now - _squiggle_cache_ts.get(year, 0)) < _CACHE_TTL:
+        return _squiggle_cache[year]
+
+    # Rate limit
+    elapsed = now - _last_squiggle_request
+    if elapsed < _SQUIGGLE_RATE_LIMIT_INTERVAL:
+        time.sleep(_SQUIGGLE_RATE_LIMIT_INTERVAL - elapsed)
+
+    try:
+        resp = http_requests.get(
+            "https://api.squiggle.com.au",
+            params={"q": "games", "year": year},
+            headers={"User-Agent": "AFL-Predict/1.0"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        games = resp.json().get("games", [])
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch data from Squiggle API: {exc}",
+        ) from exc
+    finally:
+        _last_squiggle_request = time.time()
+
+    _squiggle_cache[year] = games
+    _squiggle_cache_ts[year] = time.time()
+    return games
+
+
+def _split_played_upcoming(games: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Separate Squiggle games into played results and upcoming matches."""
+    played = []
+    upcoming = []
+    for g in games:
+        # Squiggle marks complete games with a non-zero 'complete' field or a score
+        is_complete = g.get("complete", 0) == 100 or (
+            g.get("hscore") is not None
+            and g.get("ascore") is not None
+            and g.get("hscore", 0) > 0
+        )
+        home = standardise_team_name(g.get("hteam", ""))
+        away = standardise_team_name(g.get("ateam", ""))
+        if is_complete:
+            played.append({
+                "home_team": home,
+                "away_team": away,
+                "home_score": g.get("hscore", 0),
+                "away_score": g.get("ascore", 0),
+                "venue": g.get("venue", ""),
+                "round_number": g.get("round", 0),
+            })
+        else:
+            upcoming.append({
+                "home_team": home,
+                "away_team": away,
+                "venue": g.get("venue", ""),
+                "round_number": g.get("round", 0),
+            })
+    return played, upcoming
+
+
+# ---------------------------------------------------------------------------
+# ELO ladder
+# ---------------------------------------------------------------------------
+
+
+@app.get("/elo/ladder")
+async def elo_ladder():
+    """Return all 18 AFL teams ranked by current ELO rating."""
+    if _features_df is None or _features_df.empty:
+        raise HTTPException(status_code=404, detail="No features data available.")
+
+    elo_data = {}
+    for team in AFL_TEAMS:
+        # Get latest ELO as home
+        home = _features_df[_features_df["home_team"] == team].sort_values(
+            "date", ascending=False
+        )
+        # Get latest ELO as away
+        away = _features_df[_features_df["away_team"] == team].sort_values(
+            "date", ascending=False
+        )
+
+        home_date = home.iloc[0]["date"] if not home.empty else pd.Timestamp.min
+        away_date = away.iloc[0]["date"] if not away.empty else pd.Timestamp.min
+
+        if home_date >= away_date and not home.empty:
+            elo_data[team] = float(home.iloc[0]["home_elo"])
+        elif not away.empty:
+            elo_data[team] = float(away.iloc[0]["away_elo"])
+        else:
+            elo_data[team] = 1500.0
+
+    # Sort by ELO descending
+    sorted_teams = sorted(elo_data.items(), key=lambda x: x[1], reverse=True)
+
+    return [
+        {
+            "rank": i + 1,
+            "team": team,
+            "elo": round(elo, 1),
+            "diff_from_avg": round(elo - 1500, 1),
+        }
+        for i, (team, elo) in enumerate(sorted_teams)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# New endpoints — fixture, simulate, round predictions
+# ---------------------------------------------------------------------------
+
+
+@app.get("/fixture/{year}")
+async def get_fixture(year: int):
+    """Fetch the AFL fixture for a given year from the Squiggle API."""
+    games = _fetch_squiggle_games(year)
+    played, upcoming = _split_played_upcoming(games)
+    return {
+        "year": year,
+        "total_games": len(games),
+        "played": played,
+        "upcoming": upcoming,
+    }
+
+
+@app.post("/simulate")
+async def simulate(request: SimulationRequest):
+    """Run a Monte Carlo season simulation and return ladder probabilities."""
+    games = _fetch_squiggle_games(2026)
+    played, upcoming = _split_played_upcoming(games)
+
+    if not upcoming:
+        raise HTTPException(
+            status_code=400,
+            detail="No upcoming matches found for 2026 — season may be complete.",
+        )
+
+    # Build a predict_fn compatible with simulate_season
+    def predict_fn(home_team: str, away_team: str, venue: str, round_number: int) -> dict:
+        canonical_home = standardise_team_name(home_team)
+        canonical_away = standardise_team_name(away_team)
+
+        if _model_loaded and _predictor is not None:
+            features_row = _build_feature_row(canonical_home, canonical_away, venue, round_number)
+            result = _predictor.predict_match(
+                home_team=canonical_home,
+                away_team=canonical_away,
+                venue=venue,
+                round_num=round_number,
+                features_df=features_row,
+            )
+            return {
+                "home_prob": float(result.get("win_probability", 0.5)),
+                "home_elo": features_row["home_elo"].iloc[0] if "home_elo" in features_row.columns else 1500.0,
+                "away_elo": features_row["away_elo"].iloc[0] if "away_elo" in features_row.columns else 1500.0,
+            }
+        else:
+            # Fallback: simple ELO-based probability
+            return {"home_prob": 0.5, "home_elo": 1500.0, "away_elo": 1500.0}
+
+    try:
+        sim_result = simulate_season(
+            played_results=played,
+            upcoming_matches=upcoming,
+            predict_fn=predict_fn,
+            n_simulations=request.n_simulations,
+            stochastic=True,
+        )
+
+        # Convert DataFrames to serialisable dicts
+        ladder = (
+            sim_result["deterministic_ladder"].to_dict(orient="records")
+            if hasattr(sim_result.get("deterministic_ladder", None), "to_dict")
+            else sim_result.get("deterministic_ladder", [])
+        )
+        position_probs = (
+            sim_result["position_probabilities"].to_dict(orient="records")
+            if hasattr(sim_result.get("position_probabilities", None), "to_dict")
+            else sim_result.get("position_probabilities", [])
+        )
+
+        return {
+            "n_simulations": request.n_simulations,
+            "played_games": len(played),
+            "upcoming_games": len(upcoming),
+            "deterministic_ladder": ladder,
+            "position_probabilities": position_probs,
+            "finals_probability": sim_result.get("finals_probability", {}),
+            "premiership_probability": sim_result.get("premiership_probability", {}),
+        }
+
+    except Exception as exc:
+        logger.error("Season simulation failed: %s", exc)
+        raise HTTPException(
+            status_code=500, detail=f"Simulation error: {exc}"
+        ) from exc
+
+
+@app.get("/round/{year}/{round_number}/predictions")
+async def round_predictions(year: int, round_number: int):
+    """Return predictions for every match in a specific round."""
+    games = _fetch_squiggle_games(year)
+
+    round_games = [
+        g for g in games
+        if g.get("round") == round_number
+    ]
+
+    if not round_games:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No matches found for {year} round {round_number}.",
+        )
+
+    predictions = []
+    for g in round_games:
+        home = standardise_team_name(g.get("hteam", ""))
+        away = standardise_team_name(g.get("ateam", ""))
+        venue = g.get("venue", "")
+
+        # Validate teams — skip if unknown
+        try:
+            _validate_team(home)
+            _validate_team(away)
+        except HTTPException:
+            predictions.append({
+                "home_team": home,
+                "away_team": away,
+                "venue": venue,
+                "error": f"Unknown team name: {home} or {away}",
+            })
+            continue
+
+        if _model_loaded and _predictor is not None:
+            try:
+                features_row = _build_feature_row(home, away, venue, round_number)
+                result = _predictor.predict_match(
+                    home_team=home,
+                    away_team=away,
+                    venue=venue,
+                    round_num=round_number,
+                    features_df=features_row,
+                )
+                home_prob = float(result.get("win_probability", 0.5))
+                away_prob = round(1.0 - home_prob, 4)
+                margin = float(result.get("predicted_margin", 0.0))
+                top_features = [
+                    {"feature": f["feature"], "contribution": f["shap_value"]}
+                    for f in result.get("explanation", [])
+                ]
+
+                predictions.append({
+                    "home_team": home,
+                    "away_team": away,
+                    "venue": venue,
+                    "home_prob": round(home_prob, 4),
+                    "away_prob": away_prob,
+                    "predicted_margin": round(margin, 1),
+                    "confidence": _confidence_label(home_prob),
+                    "top_features": top_features,
+                })
+            except Exception as exc:
+                predictions.append({
+                    "home_team": home,
+                    "away_team": away,
+                    "venue": venue,
+                    "error": str(exc),
+                })
+        else:
+            # Mock prediction
+            random.seed(hash((home, away, venue)))
+            home_prob = round(random.uniform(0.30, 0.70), 4)
+            predictions.append({
+                "home_team": home,
+                "away_team": away,
+                "venue": venue,
+                "home_prob": home_prob,
+                "away_prob": round(1.0 - home_prob, 4),
+                "predicted_margin": round((home_prob - 0.5) * 80, 1),
+                "confidence": _confidence_label(home_prob),
+                "top_features": [
+                    {"feature": "home_elo", "contribution": 0.15},
+                    {"feature": "away_elo", "contribution": -0.10},
+                ],
+                "note": "Mock prediction — model not yet trained.",
+            })
+
+    return {
+        "year": year,
+        "round_number": round_number,
+        "matches": len(predictions),
+        "predictions": predictions,
+    }
 
 
 @app.get("/monitor/accuracy", response_model=AccuracyReport)

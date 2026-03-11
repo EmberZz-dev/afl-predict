@@ -1,10 +1,6 @@
-# Data
+# Data (keep processed data for deployment, exclude raw)
 data/raw/
-data/processed/
 data/monitoring_log.csv
-
-# Models
-models/saved/
 
 # Python
 __pycache__/

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AFL Match Predictor</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="icon" href="/static/logo.svg" type="image/svg+xml">
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a href="#" class="navbar-brand" onclick="navigate('predictions')">
+        <img src="/static/logo.svg" alt="Logo" style="width:32px;height:32px;">
+        AFL <span>Predictor</span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#" data-page="predictions" class="active" onclick="navigate('predictions')">Predictions</a></li>
+        <li><a href="#" data-page="elo" onclick="navigate('elo')">ELO Ratings</a></li>
+        <li><a href="#" data-page="ladder" onclick="navigate('ladder')">Ladder Sim</a></li>
+        <li><a href="#" data-page="performance" onclick="navigate('performance')">Model</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="container">
+
+    <!-- ── Predictions Page ──────────────────────────────────────── -->
+    <div id="page-predictions" class="page active">
+      <div class="hero">
+        <h1>2026 AFL Season Predictions</h1>
+        <p>Machine learning-powered match predictions using ELO ratings, team form, and venue analysis</p>
+      </div>
+
+      <div class="stats-bar" id="prediction-stats">
+        <div class="stat-card">
+          <div class="stat-value">65.7%</div>
+          <div class="stat-label">Model Accuracy</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">21</div>
+          <div class="stat-label">Features</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">2,258</div>
+          <div class="stat-label">Training Matches</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">XGB+LGBM</div>
+          <div class="stat-label">Ensemble Model</div>
+        </div>
+      </div>
+
+      <div class="section-header">
+        <h2>Match Predictions</h2>
+        <p>Select a round to see win probabilities for each match</p>
+      </div>
+
+      <div id="round-selector"></div>
+      <div id="predictions-content">
+        <div class="loading"><div class="spinner"></div>Loading...</div>
+      </div>
+      <div id="matches-container"></div>
+    </div>
+
+    <!-- ── ELO Ratings Page ────────────────────────────────────── -->
+    <div id="page-elo" class="page">
+      <div class="hero">
+        <h1>ELO Power Rankings</h1>
+        <p>Dynamic ratings based on match results — stronger wins earn more, upsets are rewarded</p>
+      </div>
+
+      <div class="stats-bar">
+        <div class="stat-card">
+          <div class="stat-value">1500</div>
+          <div class="stat-label">Starting ELO</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">K=30</div>
+          <div class="stat-label">Update Speed</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">+40</div>
+          <div class="stat-label">Home Advantage</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">20%</div>
+          <div class="stat-label">Season Regression</div>
+        </div>
+      </div>
+
+      <div id="elo-content">
+        <div class="loading"><div class="spinner"></div>Loading ELO ratings...</div>
+      </div>
+    </div>
+
+    <!-- ── Ladder Simulation Page ────────────────────────────────── -->
+    <div id="page-ladder" class="page">
+      <div class="hero">
+        <h1>Season Ladder Simulation</h1>
+        <p>Monte Carlo simulation predicting the final 2026 ladder with finals and premiership probabilities</p>
+      </div>
+
+      <div class="ladder-controls">
+        <button id="sim-btn" class="btn btn-primary" onclick="runSimulation()">
+          Run Simulation
+        </button>
+        <div class="sim-slider">
+          <label style="color:var(--text-secondary);font-size:0.85rem;">Simulations:</label>
+          <input type="range" id="sim-count" min="100" max="5000" step="100" value="1000"
+            oninput="updateSimCount(this.value)">
+          <span id="sim-count-display">1,000</span>
+        </div>
+      </div>
+
+      <div id="ladder-content">
+        <div class="empty-state">
+          <p>Click <strong>Run Simulation</strong> to predict the 2026 final ladder.</p>
+          <p style="margin-top:0.5rem;font-size:0.85rem;color:var(--text-muted);">
+            The simulation uses your trained model to predict all remaining matches,<br>
+            then runs Monte Carlo sampling to estimate finals probabilities.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Model Performance Page ────────────────────────────────── -->
+    <div id="page-performance" class="page">
+      <div class="hero">
+        <h1>Model Performance</h1>
+        <p>Evaluation metrics, model comparison, and feature importance analysis</p>
+      </div>
+
+      <div id="performance-content">
+        <div class="loading"><div class="spinner"></div>Loading...</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <p>
+      AFL Match Predictor — Built with XGBoost, LightGBM, FastAPI & SHAP |
+      <a href="/docs" target="_blank">API Docs</a> |
+      <a href="https://github.com/EmberZz-dev/afl-predict" target="_blank">GitHub</a>
+    </p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

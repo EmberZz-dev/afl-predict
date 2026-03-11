@@ -78,3 +78,11 @@ class AccuracyReport(BaseModel):
     all_time: float | None = None
     total_predictions: int
     drift_detected: bool
+
+
+class SimulationRequest(BaseModel):
+    """Input schema for a season simulation request."""
+
+    n_simulations: int = Field(
+        default=1000, ge=1, le=100000, description="Number of Monte Carlo simulations"
+    )
