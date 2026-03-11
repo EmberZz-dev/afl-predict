@@ -210,9 +210,14 @@ def _build_feature_row(
             if col in latest.index and pd.notna(latest[col]):
                 row[col] = float(latest[col])
 
-    # Compute derived features
-    row["elo_diff"] = row["home_elo"] - row["away_elo"]
-    row["elo_prob"] = 1 / (1 + 10 ** ((-row["elo_diff"] - 40) / 400))
+    # Override with live ELO ratings from 2026 results
+    live_elo = _compute_live_elo()
+    row["home_elo"] = live_elo.get(home_team, row["home_elo"])
+    row["away_elo"] = live_elo.get(away_team, row["away_elo"])
+
+    # Compute derived features from live ELO
+    row["elo_diff"] = row["home_elo"] - row["away_elo"] + _ELO_HOME_ADV
+    row["elo_prob"] = _elo_expected(row["home_elo"] + _ELO_HOME_ADV, row["away_elo"])
 
     # H2H features from most recent matchup
     h2h = _features_df[
@@ -624,38 +629,109 @@ def _split_played_upcoming(games: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 # ---------------------------------------------------------------------------
-# ELO ladder
+# Live ELO computation
 # ---------------------------------------------------------------------------
+
+# ELO constants (same as src/features/build.py)
+_ELO_K = 30
+_ELO_START = 1500.0
+_ELO_HOME_ADV = 40.0
+_ELO_REGRESSION = 0.20
+
+
+def _elo_expected(rating_a: float, rating_b: float) -> float:
+    """Win probability for team A."""
+    return 1.0 / (1.0 + 10.0 ** ((rating_b - rating_a) / 400.0))
+
+
+def _elo_update(rating: float, expected: float, actual: float) -> float:
+    """Updated ELO after a game."""
+    return rating + _ELO_K * (actual - expected)
+
+
+def _get_base_elo() -> dict[str, float]:
+    """Get ELO ratings from end of training data (features.csv)."""
+    elo = {team: _ELO_START for team in AFL_TEAMS}
+
+    if _features_df is None or _features_df.empty:
+        return elo
+
+    for team in AFL_TEAMS:
+        home = _features_df[_features_df["home_team"] == team]
+        away = _features_df[_features_df["away_team"] == team]
+
+        home_last = home.iloc[-1] if not home.empty else None
+        away_last = away.iloc[-1] if not away.empty else None
+
+        if home_last is not None and away_last is not None:
+            if home_last["date"] >= away_last["date"]:
+                elo[team] = float(home_last["home_elo"])
+            else:
+                elo[team] = float(away_last["away_elo"])
+        elif home_last is not None:
+            elo[team] = float(home_last["home_elo"])
+        elif away_last is not None:
+            elo[team] = float(away_last["away_elo"])
+
+    return elo
+
+
+_live_elo_cache: dict[str, float] | None = None
+_live_elo_cache_ts: float = 0.0
+
+
+def _compute_live_elo() -> dict[str, float]:
+    """Fetch 2026 results from Squiggle and recompute ELO from base ratings."""
+    global _live_elo_cache, _live_elo_cache_ts  # noqa: PLW0603
+
+    now = time.time()
+    if _live_elo_cache is not None and (now - _live_elo_cache_ts) < _CACHE_TTL:
+        return _live_elo_cache
+
+    elo = _get_base_elo()
+
+    # Apply season regression (new season relative to training data)
+    for team in elo:
+        elo[team] = elo[team] + _ELO_REGRESSION * (_ELO_START - elo[team])
+
+    try:
+        games = _fetch_squiggle_games(2026)
+    except Exception:
+        return elo
+
+    played, _ = _split_played_upcoming(games)
+
+    # Sort by round so ELO updates happen in order
+    played.sort(key=lambda g: g.get("round_number", 0))
+
+    for game in played:
+        home = game["home_team"]
+        away = game["away_team"]
+
+        if home not in elo or away not in elo:
+            continue
+
+        home_elo = elo[home]
+        away_elo = elo[away]
+        exp_home = _elo_expected(home_elo + _ELO_HOME_ADV, away_elo)
+
+        margin = game["home_score"] - game["away_score"]
+        actual_home = 1.0 if margin > 0 else (0.0 if margin < 0 else 0.5)
+
+        elo[home] = _elo_update(home_elo, exp_home, actual_home)
+        elo[away] = _elo_update(away_elo, 1.0 - exp_home, 1.0 - actual_home)
+
+    _live_elo_cache = elo
+    _live_elo_cache_ts = time.time()
+
+    return elo
 
 
 @app.get("/elo/ladder")
 async def elo_ladder():
-    """Return all 18 AFL teams ranked by current ELO rating."""
-    if _features_df is None or _features_df.empty:
-        raise HTTPException(status_code=404, detail="No features data available.")
+    """Return all 18 AFL teams ranked by live ELO rating (updated from 2026 results)."""
+    elo_data = _compute_live_elo()
 
-    elo_data = {}
-    for team in AFL_TEAMS:
-        # Get latest ELO as home
-        home = _features_df[_features_df["home_team"] == team].sort_values(
-            "date", ascending=False
-        )
-        # Get latest ELO as away
-        away = _features_df[_features_df["away_team"] == team].sort_values(
-            "date", ascending=False
-        )
-
-        home_date = home.iloc[0]["date"] if not home.empty else pd.Timestamp.min
-        away_date = away.iloc[0]["date"] if not away.empty else pd.Timestamp.min
-
-        if home_date >= away_date and not home.empty:
-            elo_data[team] = float(home.iloc[0]["home_elo"])
-        elif not away.empty:
-            elo_data[team] = float(away.iloc[0]["away_elo"])
-        else:
-            elo_data[team] = 1500.0
-
-    # Sort by ELO descending
     sorted_teams = sorted(elo_data.items(), key=lambda x: x[1], reverse=True)
 
     return [
@@ -663,7 +739,7 @@ async def elo_ladder():
             "rank": i + 1,
             "team": team,
             "elo": round(elo, 1),
-            "diff_from_avg": round(elo - 1500, 1),
+            "diff_from_avg": round(elo - _ELO_START, 1),
         }
         for i, (team, elo) in enumerate(sorted_teams)
     ]
