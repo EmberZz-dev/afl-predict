@@ -1,197 +1,140 @@
-# AFL Match Outcome Predictor
+# AFL Match Predictor
 
-A real-time machine learning prediction system for Australian Rules Football match outcomes. End-to-end ML pipeline from data collection to production API with monitoring.
+A machine learning-powered web app that predicts AFL match outcomes, simulates the season ladder, and ranks teams using ELO ratings.
 
-## Architecture
+**[Live Demo](https://afl-predict.onrender.com)** (may take ~30s to wake up on free tier)
 
-```mermaid
-flowchart LR
-    subgraph Data["Data Layer"]
-        A1[Squiggle API]
-        A2[2,258 Matches]
-        A3[2015 - 2025]
-    end
+![Python](https://img.shields.io/badge/Python-3.11-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-    subgraph Features["Feature Engineering"]
-        B1[Custom ELO Ratings]
-        B2[Form & Momentum]
-        B3[Head-to-Head]
-        B4[Venue Effects]
-    end
+---
 
-    subgraph Models["ML Models"]
-        C1[XGBoost]
-        C2[LightGBM]
-        C3[Calibrated Ensemble]
-    end
+## What Does It Do?
 
-    subgraph API["Prediction API"]
-        D1[FastAPI Service]
-        D2[SHAP Explanations]
-        D3[Drift Monitoring]
-    end
+- **Match Predictions** — Predicts which team will win each AFL match with win probabilities
+- **ELO Rankings** — Live power rankings for all 18 AFL teams based on match results
+- **Season Simulator** — Runs thousands of simulated seasons to predict the final ladder, finals chances, and premiership odds
+- **Model Explainability** — Shows which factors (ELO, form, venue) most influence each prediction using SHAP
 
-    Data -->|Clean & Transform| Features
-    Features -->|21 Features| Models
-    Models -->|65.7% Accuracy| API
+---
 
-    style Data fill:#1e3a5f,stroke:#4a90d9,color:#fff
-    style Features fill:#2d5a1e,stroke:#5cb85c,color:#fff
-    style Models fill:#5a1e3a,stroke:#d94a7a,color:#fff
-    style API fill:#5a4a1e,stroke:#d9a04a,color:#fff
-```
+## Getting Started
 
-## Pipeline Flow
+### Prerequisites
 
-```mermaid
-flowchart TD
-    A[Squiggle API] -->|Fetch 2015-2025| B[Raw Match Data]
-    B -->|Standardize Teams & Scores| C[Clean Dataset]
-    C -->|Compute Historical Features| D[Feature Matrix]
-
-    D --> E{Temporal Split}
-    E -->|2015-2023| F[Training Set\n1,447 games]
-    E -->|2024+| G[Test Set\n397 games]
-
-    F --> H[XGBoost Classifier]
-    F --> I[LightGBM Classifier]
-    F --> J[XGBoost Regressor]
-
-    H --> K[Ensemble + Calibration]
-    I --> K
-    J --> L[Margin Prediction]
-
-    K --> M[FastAPI /predict]
-    L --> M
-
-    M --> N[SHAP Explanation]
-    M --> O[Monitoring & Drift Detection]
-
-    style A fill:#4a90d9,stroke:#fff,color:#fff
-    style K fill:#d94a7a,stroke:#fff,color:#fff
-    style M fill:#d9a04a,stroke:#fff,color:#fff
-```
-
-## Model Performance
-
-```mermaid
-xychart-beta
-    title "Model Accuracy Comparison"
-    x-axis ["XGBoost", "LightGBM", "Ensemble", "Calibrated"]
-    y-axis "Accuracy (%)" 60 --> 70
-    bar [64.7, 65.2, 65.7, 65.0]
-```
-
-| Model | Accuracy | Log Loss | Brier Score |
-|-------|----------|----------|-------------|
-| XGBoost | 64.7% | 0.600 | 0.210 |
-| LightGBM | 65.2% | 0.577 | 0.199 |
-| **Ensemble** | **65.7%** | **0.585** | **0.203** |
-| Calibrated | 65.0% | 0.602 | 0.208 |
-
-> Baseline (always predict home team): ~57%. Our ensemble beats baseline by **8.7 percentage points**.
-
-## Feature Importance
-
-```mermaid
-xychart-beta
-    title "Top 5 Feature Importance (XGBoost)"
-    x-axis ["ELO Prob", "ELO Diff", "Home ELO", "Away ELO", "Home Margin"]
-    y-axis "Importance" 0 --> 0.2
-    bar [0.161, 0.148, 0.046, 0.043, 0.040]
-```
-
-## Results
-
-- **65.7% accuracy** on 397 held-out test games (temporal split: train 2015-2023, test 2024+)
-- Beats the home-team baseline (57%) by **8.7 percentage points**
-- **Log loss 0.585** vs 0.693 for random guessing — predicted probabilities carry real information
-- **Brier score 0.203** vs 0.25 for random — well-calibrated probability estimates
-- Top predictive features: ELO win probability, ELO difference, team ELO ratings
-- All features pass leakage checks (no feature has |r| > 0.95 with the target)
-
-## Quick Start
+You just need **Python 3.10+** installed. Check by running:
 
 ```bash
-# Clone & setup
+python --version
+```
+
+If you don't have Python, download it from [python.org](https://www.python.org/downloads/).
+
+### Installation
+
+1. **Download the project**
+
+```bash
 git clone https://github.com/EmberZz-dev/afl-predict.git
 cd afl-predict
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# Run the full pipeline
-python -m src.data.collect      # Fetch AFL data from Squiggle API
-python -m src.data.clean        # Clean & standardize
-python -m src.features.build    # Engineer 21 features
-python -m src.models.train      # Train XGBoost + LightGBM ensemble
-
-# Start the API
-uvicorn src.api.main:app --reload
-# Open http://localhost:8000/docs
 ```
 
-### Dashboard
+2. **Create a virtual environment** (keeps dependencies isolated)
 
 ```bash
-streamlit run dashboard.py
-# Open http://localhost:8501
+python -m venv .venv
 ```
 
-Features:
-- **Round Predictions** — win probabilities for every upcoming match
-- **Season Simulation** — Monte Carlo ladder prediction with finals/premiership probabilities
-- **Model Performance** — live accuracy tracking on 2026 results
-- **One-click Retrain** — re-fetches data and retrains models from the sidebar
+3. **Activate the virtual environment**
 
-### Docker
+- **Mac/Linux:**
+  ```bash
+  source .venv/bin/activate
+  ```
+- **Windows:**
+  ```bash
+  .venv\Scripts\activate
+  ```
+
+4. **Install dependencies**
+
+```bash
+pip install -r requirements.txt
+```
+
+5. **Start the app**
+
+```bash
+uvicorn src.api.main:app --reload
+```
+
+6. **Open in your browser**
+
+Go to [http://localhost:8000](http://localhost:8000) — that's it!
+
+> The app comes with pre-trained models and data, so you can start using it right away.
+
+---
+
+### Want to Retrain the Models?
+
+If you want to rebuild everything from scratch with the latest data:
+
+```bash
+python -m src.data.collect      # Fetch match data from the AFL API
+python -m src.data.clean        # Clean & standardize team names
+python -m src.features.build    # Calculate ELO ratings, form, etc.
+python -m src.models.train      # Train the prediction models
+```
+
+Then restart the app with `uvicorn src.api.main:app --reload`.
+
+---
+
+### Using Docker (Alternative)
+
+If you prefer Docker:
 
 ```bash
 docker build -t afl-predict .
 docker run -p 8000:8000 afl-predict
 ```
 
-## Project Structure
+Then open [http://localhost:8000](http://localhost:8000).
 
-```
-afl-predict/
-├── src/
-│   ├── data/
-│   │   ├── collect.py          # Squiggle API data collection
-│   │   └── clean.py            # Data cleaning & standardization
-│   ├── features/
-│   │   └── build.py            # ELO, form, H2H, venue features
-│   ├── models/
-│   │   ├── train.py            # Model training & evaluation
-│   │   └── predict.py          # Inference + SHAP explanations
-│   ├── api/
-│   │   ├── main.py             # FastAPI application
-│   │   └── schemas.py          # Pydantic request/response models
-│   ├── monitoring/
-│   │   └── tracker.py          # Prediction logging & drift detection
-│   └── simulator/
-│       └── season.py           # Monte Carlo season & ladder simulation
-├── tests/
-│   ├── test_features.py        # Feature engineering & leakage tests
-│   ├── test_api.py             # API endpoint tests (25 tests)
-│   ├── test_clean.py           # Data cleaning & team name tests
-│   └── test_tracker.py         # Monitoring & drift detection tests
-├── notebooks/
-│   ├── 01_eda.ipynb             # Exploratory data analysis
-│   ├── 02_features.ipynb        # Feature analysis & correlation
-│   ├── 03_model_v1.ipynb        # Model training & evaluation
-│   ├── 04_calibration.ipynb     # Calibration & model improvement
-│   └── 05_explanations.ipynb    # SHAP explanations & monitoring
-├── docs/
-│   └── methodology.md          # Detailed methodology write-up
-├── data/                       # Raw & processed datasets (gitignored)
-├── models/saved/               # Trained model artifacts (gitignored)
-├── dashboard.py               # Streamlit dashboard (season simulation)
-├── Dockerfile
-├── requirements.txt
-└── README.md
+---
+
+## How It Works
+
+```mermaid
+flowchart LR
+    A[AFL Match Data] -->|10 years of results| B[Feature Engineering]
+    B -->|ELO, form, venue stats| C[ML Models]
+    C -->|65.7% accuracy| D[Web App]
+
+    style A fill:#1e3a5f,stroke:#4a90d9,color:#fff
+    style B fill:#2d5a1e,stroke:#5cb85c,color:#fff
+    style C fill:#5a1e3a,stroke:#d94a7a,color:#fff
+    style D fill:#5a4a1e,stroke:#d9a04a,color:#fff
 ```
 
-## Features Engineered
+1. **Data** — Collects 2,258 matches (2015–2025) from the Squiggle API
+2. **Features** — Engineers 21 predictive features including custom ELO ratings, recent form, head-to-head records, and venue effects
+3. **Models** — Trains an XGBoost + LightGBM ensemble with probability calibration
+4. **Predictions** — Serves predictions via a FastAPI backend with a modern web frontend
+
+### Model Performance
+
+| Model | Accuracy | Log Loss | Brier Score |
+|-------|----------|----------|-------------|
+| XGBoost | 64.7% | 0.600 | 0.210 |
+| LightGBM | 65.2% | 0.577 | 0.199 |
+| **Ensemble** | **65.7%** | **0.585** | **0.203** |
+
+> Home-team baseline is ~57%. Our model beats that by **8.7 percentage points**.
+
+### Features Engineered
 
 ```mermaid
 mindmap
@@ -219,19 +162,25 @@ mindmap
       Days Rest
 ```
 
+---
+
 ## API Endpoints
+
+The app also has a REST API you can use programmatically. Full interactive docs at [http://localhost:8000/docs](http://localhost:8000/docs).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/predict` | Predict match outcome with probabilities |
-| `GET` | `/teams` | All 18 AFL teams with current ELO ratings |
-| `GET` | `/model/info` | Model metadata & test set performance |
-| `GET` | `/model/features` | Feature importance rankings |
+| `POST` | `/predict` | Predict a match outcome |
+| `GET` | `/teams` | All 18 teams with ELO ratings |
+| `GET` | `/elo/ladder` | ELO power rankings |
+| `GET` | `/fixture/{year}` | Full season fixture |
+| `GET` | `/round/{year}/{round}/predictions` | Predictions for a round |
+| `POST` | `/simulate` | Monte Carlo season simulation |
 | `POST` | `/explain` | SHAP explanation for a prediction |
-| `GET` | `/health` | API health check |
-| `GET` | `/monitor/accuracy` | Rolling accuracy & drift status |
+| `GET` | `/model/info` | Model metrics |
+| `GET` | `/health` | Health check |
 
-### Example Request
+### Example
 
 ```bash
 curl -X POST http://localhost:8000/predict \
@@ -239,33 +188,28 @@ curl -X POST http://localhost:8000/predict \
   -d '{"home_team": "Carlton", "away_team": "Richmond", "venue": "MCG", "round_number": 5}'
 ```
 
-### Example Response
+---
 
-```json
-{
-  "home_team": "Carlton",
-  "away_team": "Richmond",
-  "home_win_probability": 0.62,
-  "away_win_probability": 0.38,
-  "predicted_margin": 14.3,
-  "confidence": "medium",
-  "top_features": [
-    {"feature": "elo_diff", "contribution": 0.18},
-    {"feature": "home_form_5", "contribution": 0.12},
-    {"feature": "home_venue_win_rate", "contribution": 0.09}
-  ]
-}
+## Project Structure
+
 ```
-
-## Notebooks
-
-| Notebook | Description |
-|----------|-------------|
-| `01_eda.ipynb` | Exploratory data analysis — score distributions, home advantage, venue effects |
-| `02_features.ipynb` | Feature analysis — ELO evolution, correlation matrix, leakage checks |
-| `03_model_v1.ipynb` | Model comparison — baselines, confusion matrices, ROC curves, error analysis |
-| `04_calibration.ipynb` | Platt vs isotonic calibration, reliability diagrams, interaction features |
-| `05_explanations.ipynb` | SHAP summary/dependence/waterfall plots, rolling accuracy monitoring |
+afl-predict/
+├── src/
+│   ├── data/           # Data collection & cleaning
+│   ├── features/       # ELO, form, H2H, venue feature engineering
+│   ├── models/         # Model training & prediction
+│   ├── api/            # FastAPI app & schemas
+│   ├── monitoring/     # Drift detection & accuracy tracking
+│   └── simulator/      # Monte Carlo season simulation
+├── static/             # Website (HTML, CSS, JS)
+├── models/saved/       # Pre-trained model files
+├── data/processed/     # Processed datasets
+├── notebooks/          # Jupyter analysis notebooks (EDA → SHAP)
+├── tests/              # 56 pytest tests
+├── Dockerfile
+├── requirements.txt
+└── README.md
+```
 
 ## Testing
 
@@ -273,32 +217,19 @@ curl -X POST http://localhost:8000/predict \
 python -m pytest tests/ -v
 ```
 
-56 tests covering:
-- **API endpoints** (25 tests) — all 7 endpoints, error handling, validation
-- **Feature engineering** (8 tests) — ELO calculations, data leakage prevention
-- **Data cleaning** (13 tests) — team name standardisation, round number parsing
-- **Monitoring** (10 tests) — prediction logging, drift detection, accuracy reports
+56 tests covering API endpoints, feature engineering, data cleaning, and monitoring.
+
+---
 
 ## Tech Stack
 
 | Layer | Technologies |
 |-------|-------------|
-| **Data** | pandas, requests, Squiggle API |
-| **ML** | scikit-learn, XGBoost, LightGBM, SHAP |
+| **Data** | pandas, Squiggle API |
+| **ML** | XGBoost, LightGBM, scikit-learn, SHAP |
 | **API** | FastAPI, Pydantic, uvicorn |
-| **Monitoring** | Custom drift detector, matplotlib |
-| **Testing** | pytest, FastAPI TestClient |
-| **Deployment** | Docker, uvicorn |
-
-## Methodology
-
-See [docs/methodology.md](docs/methodology.md) for detailed explanation of:
-- Feature engineering decisions and rationale
-- ELO rating system design (K-factor, home advantage, season regression)
-- Temporal train/test split (no data leakage)
-- Model selection and hyperparameter tuning
-- Probability calibration (Platt scaling)
-- Evaluation framework and metrics
+| **Frontend** | HTML, CSS, JavaScript |
+| **Deployment** | Docker, Render |
 
 ## License
 
