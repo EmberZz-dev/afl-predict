@@ -6,13 +6,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
+# Copy source code and assets
 COPY src/ src/
 COPY models/ models/
 COPY data/ data/
+COPY static/ static/
 
-# Expose the API port
+# Render sets PORT dynamically; default to 8000 for local use
+ENV PORT=8000
 EXPOSE 8000
 
-# Run the API server
-CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use shell form so $PORT is expanded at runtime
+CMD uvicorn src.api.main:app --host 0.0.0.0 --port $PORT
