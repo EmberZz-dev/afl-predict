@@ -63,15 +63,13 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-5. **Start the app**
+5. **Run it**
 
 ```bash
 uvicorn src.api.main:app --reload
 ```
 
-6. **Open in your browser**
-
-Go to [http://localhost:8000](http://localhost:8000) — that's it!
+Open the link shown in your terminal (usually http://localhost:8000) — that's it!
 
 > The app comes with pre-trained models and data, so you can start using it right away.
 
@@ -101,7 +99,7 @@ docker build -t afl-predict .
 docker run -p 8000:8000 afl-predict
 ```
 
-Then open [http://localhost:8000](http://localhost:8000).
+Open the link shown in your terminal.
 
 ---
 
@@ -166,7 +164,7 @@ mindmap
 
 ## API Endpoints
 
-The app also has a REST API you can use programmatically. Full interactive docs at [http://localhost:8000/docs](http://localhost:8000/docs).
+The app also has a REST API you can use programmatically. Full interactive docs available at `/docs`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -183,7 +181,7 @@ The app also has a REST API you can use programmatically. Full interactive docs 
 ### Example
 
 ```bash
-curl -X POST http://localhost:8000/predict \
+curl -X POST https://afl-predict.onrender.com/predict \
   -H "Content-Type: application/json" \
   -d '{"home_team": "Carlton", "away_team": "Richmond", "venue": "MCG", "round_number": 5}'
 ```
