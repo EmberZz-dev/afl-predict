@@ -68,6 +68,7 @@ const TEAM_LOGO_URLS = {
 };
 
 function teamLogo(team, size = 56) {
+  if (!team) return `<div class="team-logo" style="width:${size}px;height:${size}px;background:#333">TBD</div>`;
   const url = TEAM_LOGO_URLS[team];
   const color = TEAM_COLORS[team] || '#333';
   const abbrev = TEAM_ABBREV[team] || team.substring(0, 3).toUpperCase();
@@ -111,6 +112,9 @@ async function loadPredictions() {
     const res = await fetch(`${API}/fixture/2026`);
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     fixtureData = await res.json();
+
+    // Filter out finals rounds with null teams (TBD)
+    fixtureData.upcoming = fixtureData.upcoming.filter(g => g.home_team && g.away_team);
 
     renderRoundSelector();
     const upcomingRounds = [...new Set(fixtureData.upcoming.map(g => g.round_number))].sort((a, b) => a - b);

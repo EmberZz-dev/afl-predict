@@ -44,14 +44,14 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 AFL_TEAMS = [
     "Adelaide",
-    "Brisbane Lions",
+    "Brisbane",
     "Carlton",
     "Collingwood",
     "Essendon",
     "Fremantle",
     "Geelong",
     "Gold Coast",
-    "GWS Giants",
+    "Greater Western Sydney",
     "Hawthorn",
     "Melbourne",
     "North Melbourne",
