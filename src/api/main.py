@@ -320,8 +320,12 @@ async def serve_frontend():
     """Serve the main frontend page."""
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
-        return FileResponse(str(index_path))
-    return {"message": "AFL Match Predictor API. Visit /docs for API documentation."}
+        return FileResponse(str(index_path), media_type="text/html")
+    return {
+        "message": "AFL Match Predictor API. Visit /docs for API documentation.",
+        "debug_static_dir": str(STATIC_DIR),
+        "static_dir_exists": STATIC_DIR.exists(),
+    }
 
 
 @app.post("/predict", response_model=PredictionResponse)
